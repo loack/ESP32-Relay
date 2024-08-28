@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jacuzzi Wifi</title>
+    <link rel="stylesheet" href="bootstrap.min.css"  integrity="sha384-giJF6kkoqNQ00vy+HMDP7azOuL0xtbfIcaT9wjKHr8RbDVddVHyTfAAsrekwKmP1" crossorigin="anonymous">
+    <link rel="stylesheet" href="all.min.css" integrity="sha512-HK5fgLBL+xu6dm/Ii3z4xhlSUyZgTT9tuc/hSrtw6uzJOvgRr2a9jyxxT1ely+B+xFAmJKVSTbpM/CuL7qxO8w==" crossorigin="anonymous" />
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" type="image/png" href=" data:image/png;base64,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">
+    <script type="text/javascript" src="script.js"></script>
+
+    <!-- script pour draggable -->
+    <script src='jquery.min.js'></script>
+    <script src='gsap.min.js'></script>
+    <script src='Draggable.min.js'></script>
+</head>
+
+<body>
+    <div class="container">
+        <div class="d-flex flex-row align-items-center justify-content-between px-2 py-4">
+            <i></i>
+            <span class="font20 weight-600 dark-grey">Jacuzzi Gallochat</span>
+            <a href="config.html">Config<i class="fas fa-cog dark-grey"></i></a>
+        </div>
+
+        <div class="pb-5 d-flex flex-row align-items-center justify-content-center">
+            <span class="light-grey">Température</span>
+        </div>
+
+        <div class="mt-5 pt-5 position-relative d-flex flex-row justify-content-center align-items-center">
+            <div class="outer position-absolute">
+                <div class="marker" id="selectmarker"></div>
+            </div>
+            <div class="middle position-absolute"></div>
+            <div class="inner position-absolute d-flex flex-column justify-content-center align-items-center">
+                <span class="font14 blue">Cooling</span>
+                <span class="font48 weight-700 dark-grey" id="valeurTemperature">24</span>
+            </div>
+        </div>
+
+        <div class="mt-5 pt-5 d-flex flex-row justify-content-center">
+            <span class="font20 medium-grey mx-2 mt-2" id="tempIndicator">24.5 °C</span>
+        </div>
+        <div class="d-flex flex-row justify-content-center">
+            <span class="font10 medium-grey mx-2 mt-2">T1 = </span>
+            <span class="font10 medium-grey mx-2 mt-2" id="T1">0.0V</span>
+        </div>
+        <div class="d-flex flex-row justify-content-center">
+            <span class="font10 medium-grey mx-2 mt-2">T2 = </span>
+            <span class="font10 medium-grey mx-2 mt-2"id="T2">0.0V</span>
+        </div>
+        <div class="d-flex flex-row justify-content-center">
+            <span class="font10 medium-grey mx-2 mt-2">Flow = </span>
+            <span class="font10 medium-grey mx-2 mt-2" id ="Flow">0.V</span>
+        </div>
+        <div class="mt-5 pt-5 d-flex flex-row justify-content-center"></div>
+        <div class="d-flex flex-row justify-content-around mt-5 pt-3 menu">
+            <i class="fas fa-thermometer-quarter" id="tempButton" onclick=onButton(this.id)>Temp</i>
+            <i class="fas fa-wind" id="flowButton" onclick="onButton(this.id)">Flow</i>
+            <i class="fas fa-soap" id="bubblesButton" onclick="onButton(this.id)">Bubbles</i>
+        </div>
+    </div>
+</body>
+
+</html>
