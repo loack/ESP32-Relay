@@ -239,7 +239,6 @@ while(file){
 }
 
 //-----Server config----------------
-
 // Route for root / web page
 server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
   request->send(SPIFFS, "/index.html", String(), false);
@@ -253,7 +252,6 @@ server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request){
 server.on("/script.js", HTTP_GET, [](AsyncWebServerRequest *request){
   request->send(SPIFFS, "/script.js", "text/javascript");
 });
-
 //Load data from server
 server.on("/all.min.css", HTTP_GET, [](AsyncWebServerRequest *request){
   request->send(SPIFFS, "/all.min.css", "text/css");
@@ -272,7 +270,6 @@ server.on("/jquery.min.js", HTTP_GET, [](AsyncWebServerRequest *request){
 });
 
 // Lire des données des capteurs et envoyer à l'interface web
-
 server.on("/getData", HTTP_GET, [](AsyncWebServerRequest *request){
   //Serial.println(dataJson);
   request->send(200, "text/plain", IOData());
@@ -282,12 +279,10 @@ server.on("/getData", HTTP_GET, [](AsyncWebServerRequest *request){
 
 // Route to set GPIO to HIGH
 server.on("/activate", HTTP_GET, [](AsyncWebServerRequest *request){
-
   int paramsNr = request->params();
   AsyncWebParameter* p = request->getParam(0);
   //activate from button
   activation(p->name(), p->value());
-
   request->send(200, "text/plain", "message received");
 });
 
