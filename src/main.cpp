@@ -38,22 +38,32 @@ void setPinsSequentially(const int* pins, int numPins) {
 }
 
 void startrelais(const int* pins, int pin_nb){
-  digitalWrite(pins[pin_nb], HIGH);
+  digitalWrite(pins[pin_nb-1], HIGH);
   Serial.print("Started relais K");
   Serial.println(pin_nb);
 }
 
 void stoprelais(const int* pins, int pin_nb){
-  digitalWrite(pins[pin_nb], LOW);
+  digitalWrite(pins[pin_nb-1], LOW);
   Serial.print("Stoped relais K");
   Serial.println(pin_nb);
 }
 
 void handleStart(AsyncWebServerRequest *request) {
     if (request->hasParam("relay")) {
-        int relayIndex = request->getParam("relay")->value().toInt();
-        startrelais(relayPins, relayIndex);
-        request->send(200, "text/plain", "Relay started: " + String(relayIndex));
+        String paramValue = request->getParam("relay")->value();
+        if (paramValue=="all"){
+          for (int i=1; i<5;i++){
+            startrelais(relayPins, i);
+          }
+          request->send(200, "text/plain", "All relays started");
+        }
+        else{
+          int relayIndex = paramValue.toInt();
+          startrelais(relayPins, relayIndex);
+          request->send(200, "text/plain", "Relay started: " + String(relayIndex));
+        }
+
     } else {
         request->send(400, "text/plain", "Missing relay parameter");
     }
@@ -61,9 +71,19 @@ void handleStart(AsyncWebServerRequest *request) {
 
 void handleStop(AsyncWebServerRequest *request) {
     if (request->hasParam("relay")) {
-        int relayIndex = request->getParam("relay")->value().toInt();
-        stoprelais(relayPins, relayIndex);
-        request->send(200, "text/plain", "Relay started: " + String(relayIndex));
+        String paramValue = request->getParam("relay")->value();
+        if (paramValue=="all"){
+          for (int i=1; i<5;i++){
+            stoprelais(relayPins, i);
+          }
+          request->send(200, "text/plain", "All relays stoped");
+        }
+        else{
+          int relayIndex = paramValue.toInt();
+          stoprelais(relayPins, relayIndex);
+          request->send(200, "text/plain", "Relay stoped: " + String(relayIndex));
+        }
+
     } else {
         request->send(400, "text/plain", "Missing relay parameter");
     }
