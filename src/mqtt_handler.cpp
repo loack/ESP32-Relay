@@ -1,11 +1,16 @@
 #include <Arduino.h>
 #include <PubSubClient.h>
+#include <ArduinoJson.h>
 #include "config.h"
 
 extern Config config;
 extern PubSubClient mqttClient;
 extern void activateRelay(bool open);
 extern void deactivateRelay();
+extern bool addNewAccessCode(uint32_t code, uint8_t type, const char* name);
+extern bool removeAccessCode(uint32_t code, uint8_t type);
+extern void startLearningMode(uint8_t type, const char* name);
+extern void stopLearningMode();
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
   Serial.print("MQTT message received on topic: ");
@@ -17,9 +22,10 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   message[length] = '\0';
   
   String topicStr = String(topic);
-  String baseTopicCmd = String(config.mqttTopic) + "/cmd";
+  String baseTopic = String(config.mqttTopic);
   
-  if (topicStr == baseTopicCmd) {
+  // Topic: roller/cmd - Commandes relais
+  if (topicStr == baseTopic + "/cmd") {
     String cmd = String(message);
     
     if (cmd == "open") {
@@ -35,6 +41,80 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
       Serial.print("Unknown MQTT command: ");
       Serial.println(cmd);
     }
+  }
+  
+  // Topic: roller/codes/add - Ajouter un code
+  else if (topicStr == baseTopic + "/codes/add") {
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, message);
+    
+    if (error) {
+      Serial.print("JSON parse error: ");
+      Serial.println(error.c_str());
+      return;
+    }
+    
+    if (doc["code"].is<uint32_t>() && doc["type"].is<uint8_t>() && doc["name"].is<const char*>()) {
+      uint32_t code = doc["code"];
+      uint8_t type = doc["type"];
+      const char* name = doc["name"];
+      
+      Serial.printf("MQTT: Add code %lu, type %d, name %s\n", code, type, name);
+      addNewAccessCode(code, type, name);
+    } else {
+      Serial.println("MQTT: Invalid add code format. Expected: {\"code\":123,\"type\":0,\"name\":\"Name\"}");
+    }
+  }
+  
+  // Topic: roller/codes/remove - Supprimer un code
+  else if (topicStr == baseTopic + "/codes/remove") {
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, message);
+    
+    if (error) {
+      Serial.print("JSON parse error: ");
+      Serial.println(error.c_str());
+      return;
+    }
+    
+    if (doc["code"].is<uint32_t>() && doc["type"].is<uint8_t>()) {
+      uint32_t code = doc["code"];
+      uint8_t type = doc["type"];
+      
+      Serial.printf("MQTT: Remove code %lu, type %d\n", code, type);
+      removeAccessCode(code, type);
+    } else {
+      Serial.println("MQTT: Invalid remove code format. Expected: {\"code\":123,\"type\":0}");
+    }
+  }
+  
+  // Topic: roller/learn - Activer mode apprentissage
+  else if (topicStr == baseTopic + "/learn") {
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, message);
+    
+    if (error) {
+      Serial.print("JSON parse error: ");
+      Serial.println(error.c_str());
+      return;
+    }
+    
+    if (doc["type"].is<uint8_t>() && doc["name"].is<const char*>()) {
+      uint8_t type = doc["type"];
+      const char* name = doc["name"];
+      
+      Serial.printf("MQTT: Start learning mode - type %d, name %s\n", type, name);
+      startLearningMode(type, name);
+    } else {
+      Serial.println("MQTT: Invalid learn format. Expected: {\"type\":1,\"name\":\"BadgeName\"}");
+      Serial.println("Types: 0=Keypad, 1=RFID, 2=Fingerprint");
+    }
+  }
+  
+  // Topic: roller/learn/stop - Arrêter mode apprentissage
+  else if (topicStr == baseTopic + "/learn/stop") {
+    Serial.println("MQTT: Stop learning mode");
+    stopLearningMode();
   }
 }
 
@@ -69,14 +149,23 @@ void reconnectMQTT() {
       Serial.println(" connected!");
       
       // Souscription aux topics de commande
-      String cmdTopic = String(config.mqttTopic) + "/cmd";
-      mqttClient.subscribe(cmdTopic.c_str());
+      String baseTopic = String(config.mqttTopic);
+      
+      mqttClient.subscribe((baseTopic + "/cmd").c_str());
+      mqttClient.subscribe((baseTopic + "/codes/add").c_str());
+      mqttClient.subscribe((baseTopic + "/codes/remove").c_str());
+      mqttClient.subscribe((baseTopic + "/learn").c_str());
+      mqttClient.subscribe((baseTopic + "/learn/stop").c_str());
       
       // Publication du statut de connexion
-      String statusTopic = String(config.mqttTopic) + "/status";
-      mqttClient.publish(statusTopic.c_str(), "{\"state\":\"online\"}");
+      mqttClient.publish((baseTopic + "/status").c_str(), "{\"state\":\"online\"}");
       
-      Serial.printf("Subscribed to: %s\n", cmdTopic.c_str());
+      Serial.println("Subscribed to MQTT topics:");
+      Serial.printf("  - %s/cmd\n", baseTopic.c_str());
+      Serial.printf("  - %s/codes/add\n", baseTopic.c_str());
+      Serial.printf("  - %s/codes/remove\n", baseTopic.c_str());
+      Serial.printf("  - %s/learn\n", baseTopic.c_str());
+      Serial.printf("  - %s/learn/stop\n", baseTopic.c_str());
     } else {
       Serial.print(" failed, rc=");
       Serial.println(mqttClient.state());

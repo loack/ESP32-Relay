@@ -35,6 +35,13 @@ String keypadBuffer = "";
 unsigned long lastKeypadInput = 0;
 const unsigned long KEYPAD_TIMEOUT = 10000;  // 10 secondes
 
+// Variables pour mode apprentissage (learning mode)
+bool learningMode = false;
+unsigned long learningModeStart = 0;
+const unsigned long LEARNING_TIMEOUT = 60000;  // 60 secondes
+uint8_t learningType = 0;  // 0=Keypad, 1=RFID, 2=Fingerprint
+String learningName = "";
+
 // ===== PROTOTYPES =====
 void loadConfig();
 void saveConfig();
@@ -48,6 +55,10 @@ void handleWiegandInput();
 bool checkTriplePress();
 void blinkReaderLED(bool success);
 void processKeypadCode();
+bool addNewAccessCode(uint32_t code, uint8_t type, const char* name);
+bool removeAccessCode(uint32_t code, uint8_t type);
+void startLearningMode(uint8_t type, const char* name);
+void stopLearningMode();
 
 // Fonctions externes (définies dans d'autres fichiers)
 void setupWebServer();
@@ -332,6 +343,12 @@ void addAccessLog(uint32_t code, bool granted, uint8_t type) {
 }
 
 void handleWiegandInput() {
+  // Vérifier timeout du mode apprentissage
+  if (learningMode && (millis() - learningModeStart > LEARNING_TIMEOUT)) {
+    Serial.println("⏱ Learning mode timeout");
+    stopLearningMode();
+  }
+  
   // Vérifier timeout du buffer keypad
   if (keypadBuffer.length() > 0 && (millis() - lastKeypadInput > KEYPAD_TIMEOUT)) {
     Serial.println("⏱ Keypad timeout - buffer cleared");
@@ -383,6 +400,14 @@ void handleWiegandInput() {
       if (code < 100) {
         Serial.printf("👆 FINGERPRINT #%lu validated by reader\n", code);
         
+        // MODE APPRENTISSAGE pour empreinte
+        if (learningMode && learningType == 2) {
+          addNewAccessCode(code, 2, learningName.c_str());
+          stopLearningMode();
+          blinkReaderLED(true);
+          return;
+        }
+        
         // Vérifier si ce numéro d'empreinte est autorisé dans notre système
         bool granted = checkAccessCode(code, 2);  // Type 2 = Fingerprint
         addAccessLog(code, granted, 2);
@@ -411,6 +436,14 @@ void handleWiegandInput() {
       // Sinon (≥ 100), c'est un BADGE RFID 26 bits
       else {
         Serial.printf("🔖 RFID badge (26-bit) detected: %lu (0x%06X)\n", code, code);
+        
+        // MODE APPRENTISSAGE pour RFID
+        if (learningMode && learningType == 1) {
+          addNewAccessCode(code, 1, learningName.c_str());
+          stopLearningMode();
+          blinkReaderLED(true);
+          return;
+        }
         
         bool granted = checkAccessCode(code, 1);  // Type 1 = RFID
         addAccessLog(code, granted, 1);
@@ -441,6 +474,14 @@ void handleWiegandInput() {
     // 3. BADGE RFID (généralement 34-35 bits, parfois 32 bits)
     else if (bitCount >= 32) {
       Serial.printf("🔖 RFID badge detected: %lu (0x%X) - %u bits\n", code, code, bitCount);
+      
+      // MODE APPRENTISSAGE pour RFID
+      if (learningMode && learningType == 1) {
+        addNewAccessCode(code, 1, learningName.c_str());
+        stopLearningMode();
+        blinkReaderLED(true);
+        return;
+      }
       
       bool granted = checkAccessCode(code, 1);  // Type 1 = RFID
       addAccessLog(code, granted, 1);
@@ -578,4 +619,118 @@ void deactivateRelay() {
   
   Serial.println("⚡ Relay deactivated");
   publishMQTT("relay", "{\"action\":\"stopped\"}");
+}
+
+// ===== FONCTIONS GESTION CODES D'ACCÈS =====
+bool addNewAccessCode(uint32_t code, uint8_t type, const char* name) {
+  // Vérifier si le code existe déjà
+  for (int i = 0; i < accessCodeCount; i++) {
+    if (accessCodes[i].code == code && accessCodes[i].type == type) {
+      Serial.printf("⚠ Code already exists: %lu (type %d)\n", code, type);
+      return false;
+    }
+  }
+  
+  // Vérifier si on a de la place
+  if (accessCodeCount >= 50) {
+    Serial.println("✗ Access codes list full (max 50)");
+    return false;
+  }
+  
+  // Ajouter le nouveau code
+  accessCodes[accessCodeCount].code = code;
+  accessCodes[accessCodeCount].type = type;
+  strncpy(accessCodes[accessCodeCount].name, name, sizeof(accessCodes[accessCodeCount].name) - 1);
+  accessCodes[accessCodeCount].name[sizeof(accessCodes[accessCodeCount].name) - 1] = '\0';
+  accessCodes[accessCodeCount].active = true;
+  
+  accessCodeCount++;
+  saveAccessCodes();
+  
+  Serial.printf("✓ New access code added: %s (code=%lu, type=%d)\n", name, code, type);
+  
+  // Publication MQTT
+  char payload[256];
+  snprintf(payload, sizeof(payload), 
+           "{\"action\":\"added\",\"code\":%lu,\"type\":%d,\"name\":\"%s\",\"total\":%d}", 
+           code, type, name, accessCodeCount);
+  publishMQTT("codes", payload);
+  
+  return true;
+}
+
+bool removeAccessCode(uint32_t code, uint8_t type) {
+  // Chercher le code
+  int foundIndex = -1;
+  for (int i = 0; i < accessCodeCount; i++) {
+    if (accessCodes[i].code == code && accessCodes[i].type == type) {
+      foundIndex = i;
+      break;
+    }
+  }
+  
+  if (foundIndex == -1) {
+    Serial.printf("⚠ Code not found: %lu (type %d)\n", code, type);
+    return false;
+  }
+  
+  // Sauvegarder le nom pour le log
+  char removedName[32];
+  strncpy(removedName, accessCodes[foundIndex].name, sizeof(removedName));
+  
+  // Décaler tous les codes suivants
+  for (int i = foundIndex; i < accessCodeCount - 1; i++) {
+    accessCodes[i] = accessCodes[i + 1];
+  }
+  
+  accessCodeCount--;
+  saveAccessCodes();
+  
+  Serial.printf("✓ Access code removed: %s (code=%lu, type=%d)\n", removedName, code, type);
+  
+  // Publication MQTT
+  char payload[256];
+  snprintf(payload, sizeof(payload), 
+           "{\"action\":\"removed\",\"code\":%lu,\"type\":%d,\"name\":\"%s\",\"total\":%d}", 
+           code, type, removedName, accessCodeCount);
+  publishMQTT("codes", payload);
+  
+  return true;
+}
+
+void startLearningMode(uint8_t type, const char* name) {
+  learningMode = true;
+  learningModeStart = millis();
+  learningType = type;
+  learningName = String(name);
+  
+  const char* typeNames[] = {"Keypad", "RFID", "Fingerprint"};
+  Serial.printf("\n🎓 LEARNING MODE activated for %s\n", typeNames[type]);
+  Serial.printf("Name: %s\n", name);
+  Serial.println("Waiting for input... (60 seconds)");
+  
+  // Clignoter la LED pour indiquer le mode apprentissage
+  for(int i=0; i<5; i++) {
+    digitalWrite(STATUS_LED, HIGH);
+    delay(100);
+    digitalWrite(STATUS_LED, LOW);
+    delay(100);
+  }
+  
+  // Publication MQTT
+  char payload[256];
+  snprintf(payload, sizeof(payload), 
+           "{\"learning\":true,\"type\":%d,\"name\":\"%s\",\"timeout\":60}", 
+           type, name);
+  publishMQTT("status", payload);
+}
+
+void stopLearningMode() {
+  if (learningMode) {
+    learningMode = false;
+    Serial.println("🎓 LEARNING MODE deactivated\n");
+    
+    // Publication MQTT
+    publishMQTT("status", "{\"learning\":false}");
+  }
 }
