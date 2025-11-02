@@ -30,6 +30,11 @@ unsigned long relayStartTime = 0;
 bool relayActive = false;
 unsigned long lastMqttReconnect = 0;
 
+// Variables pour accumulation des codes numériques
+String keypadBuffer = "";
+unsigned long lastKeypadInput = 0;
+const unsigned long KEYPAD_TIMEOUT = 10000;  // 10 secondes
+
 // ===== PROTOTYPES =====
 void loadConfig();
 void saveConfig();
@@ -41,6 +46,8 @@ void activateRelay(bool open);
 void deactivateRelay();
 void handleWiegandInput();
 bool checkTriplePress();
+void blinkReaderLED(bool success);
+void processKeypadCode();
 
 // Fonctions externes (définies dans d'autres fichiers)
 void setupWebServer();
@@ -103,10 +110,14 @@ void setup() {
   pinMode(PHOTO_BARRIER, INPUT_PULLUP);
   pinMode(STATUS_LED, OUTPUT);
   pinMode(RESET_WIFI_BUTTON, INPUT_PULLUP);
+  pinMode(READER_LED_RED, OUTPUT);
+  pinMode(READER_LED_GREEN, OUTPUT);
   
   digitalWrite(RELAY_OPEN, LOW);
   digitalWrite(RELAY_CLOSE, LOW);
   digitalWrite(STATUS_LED, LOW);
+  digitalWrite(READER_LED_RED, LOW);
+  digitalWrite(READER_LED_GREEN, LOW);
   
   // ===== CONFIGURATION WiFi EN PREMIER =====
   // Configuration WiFiManager (AVANT les paramètres WiFi)
@@ -321,46 +332,203 @@ void addAccessLog(uint32_t code, bool granted, uint8_t type) {
 }
 
 void handleWiegandInput() {
+  // Vérifier timeout du buffer keypad
+  if (keypadBuffer.length() > 0 && (millis() - lastKeypadInput > KEYPAD_TIMEOUT)) {
+    Serial.println("⏱ Keypad timeout - buffer cleared");
+    keypadBuffer = "";
+  }
+  
   if (wg.available()) {
-    uint8_t type = wg.getWiegandType();
+    uint8_t bitCount = wg.getWiegandType();
     uint32_t code = wg.getCode();
     
-    Serial.printf("\n>>> Wiegand input detected: %u bits, code=%lu\n", type, code);
+    Serial.printf("\n>>> Wiegand input: %u bits, raw code=%lu (0x%X)\n", bitCount, code, code);
     
-    bool granted = checkAccessCode(code, 0);  // Type 0 = Wiegand/Keypad
-    addAccessLog(code, granted, 0);
+    // ===== GESTION SELON LE TYPE =====
     
-    if (granted) {
-      Serial.println("✓✓✓ Access GRANTED ✓✓✓");
-      digitalWrite(STATUS_LED, HIGH);
-      activateRelay(true);  // Ouverture
+    // 1. CODES NUMÉRIQUES (4 bits = 1 chiffre)
+    if (bitCount == 4) {
+      lastKeypadInput = millis();
       
-      // Publication MQTT
-      char payload[128];
-      snprintf(payload, sizeof(payload), 
-               "{\"code\":%lu,\"granted\":true,\"type\":\"wiegand\",\"bits\":%u}", 
-               code, type);
-      publishMQTT("access", payload);
-      
-      delay(500);
-      digitalWrite(STATUS_LED, LOW);
-    } else {
-      Serial.println("✗✗✗ Access DENIED ✗✗✗");
-      // Clignotement rapide pour refus
-      for(int i=0; i<3; i++) {
-        digitalWrite(STATUS_LED, HIGH);
-        delay(100);
-        digitalWrite(STATUS_LED, LOW);
-        delay(100);
+      // Touche # = validation (code 13)
+      if (code == 13) {
+        Serial.printf("✓ # pressed - Validating code: %s\n", keypadBuffer.c_str());
+        processKeypadCode();
+        keypadBuffer = "";
       }
-      
-      char payload[128];
-      snprintf(payload, sizeof(payload), 
-               "{\"code\":%lu,\"granted\":false,\"type\":\"wiegand\",\"bits\":%u}", 
-               code, type);
-      publishMQTT("access", payload);
+      // Touche * = annulation (code 14)
+      else if (code == 14) {
+        Serial.println("✗ * pressed - Clearing buffer");
+        keypadBuffer = "";
+        blinkReaderLED(false);
+      }
+      // Chiffres 0-9
+      else if (code <= 9) {
+        keypadBuffer += String(code);
+        Serial.printf("Keypad buffer: %s\n", keypadBuffer.c_str());
+        
+        // Limite à 10 chiffres
+        if (keypadBuffer.length() > 10) {
+          keypadBuffer = keypadBuffer.substring(1);
+        }
+      }
+      else {
+        Serial.printf("⚠ Unknown keypad code: %lu\n", code);
+      }
     }
+    
+    // 2. DONNÉES 26 BITS (Empreinte OU RFID selon la valeur)
+    else if (bitCount == 26) {
+      // Si le code est simple (< 100), c'est une EMPREINTE validée par le lecteur
+      if (code < 100) {
+        Serial.printf("👆 FINGERPRINT #%lu validated by reader\n", code);
+        
+        // Vérifier si ce numéro d'empreinte est autorisé dans notre système
+        bool granted = checkAccessCode(code, 2);  // Type 2 = Fingerprint
+        addAccessLog(code, granted, 2);
+        
+        if (granted) {
+          Serial.println("✓✓✓ Fingerprint GRANTED ✓✓✓");
+          blinkReaderLED(true);
+          activateRelay(true);
+          
+          char payload[128];
+          snprintf(payload, sizeof(payload), 
+                   "{\"code\":%lu,\"granted\":true,\"type\":\"fingerprint\",\"bits\":%u}", 
+                   code, bitCount);
+          publishMQTT("access", payload);
+        } else {
+          Serial.println("✗✗✗ Fingerprint DENIED (not authorized in system) ✗✗✗");
+          blinkReaderLED(false);
+          
+          char payload[128];
+          snprintf(payload, sizeof(payload), 
+                   "{\"code\":%lu,\"granted\":false,\"type\":\"fingerprint\",\"reason\":\"not_authorized\",\"bits\":%u}", 
+                   code, bitCount);
+          publishMQTT("access", payload);
+        }
+      }
+      // Sinon (≥ 100), c'est un BADGE RFID 26 bits
+      else {
+        Serial.printf("🔖 RFID badge (26-bit) detected: %lu (0x%06X)\n", code, code);
+        
+        bool granted = checkAccessCode(code, 1);  // Type 1 = RFID
+        addAccessLog(code, granted, 1);
+        
+        if (granted) {
+          Serial.println("✓✓✓ RFID GRANTED ✓✓✓");
+          blinkReaderLED(true);
+          activateRelay(true);
+          
+          char payload[128];
+          snprintf(payload, sizeof(payload), 
+                   "{\"code\":%lu,\"granted\":true,\"type\":\"rfid\",\"bits\":%u}", 
+                   code, bitCount);
+          publishMQTT("access", payload);
+        } else {
+          Serial.println("✗✗✗ RFID DENIED ✗✗✗");
+          blinkReaderLED(false);
+          
+          char payload[128];
+          snprintf(payload, sizeof(payload), 
+                   "{\"code\":%lu,\"granted\":false,\"type\":\"rfid\",\"bits\":%u}", 
+                   code, bitCount);
+          publishMQTT("access", payload);
+        }
+      }
+    }
+    
+    // 3. BADGE RFID (généralement 34-35 bits, parfois 32 bits)
+    else if (bitCount >= 32) {
+      Serial.printf("🔖 RFID badge detected: %lu (0x%X) - %u bits\n", code, code, bitCount);
+      
+      bool granted = checkAccessCode(code, 1);  // Type 1 = RFID
+      addAccessLog(code, granted, 1);
+      
+      if (granted) {
+        Serial.println("✓✓✓ RFID GRANTED ✓✓✓");
+        blinkReaderLED(true);
+        activateRelay(true);
+        
+        char payload[128];
+        snprintf(payload, sizeof(payload), 
+                 "{\"code\":%lu,\"granted\":true,\"type\":\"rfid\",\"bits\":%u}", 
+                 code, bitCount);
+        publishMQTT("access", payload);
+      } else {
+        Serial.println("✗✗✗ RFID DENIED ✗✗✗");
+        blinkReaderLED(false);
+        
+        char payload[128];
+        snprintf(payload, sizeof(payload), 
+                 "{\"code\":%lu,\"granted\":false,\"type\":\"rfid\",\"bits\":%u}", 
+                 code, bitCount);
+        publishMQTT("access", payload);
+      }
+    }
+    
+    // 4. AUTRE (format inconnu - probablement 8 ou 24 bits)
+    else {
+      Serial.printf("❓ Unknown Wiegand format: %u bits, code=%lu (0x%X)\n", bitCount, code, code);
+    }
+    
     Serial.println();
+  }
+}
+
+// Fonction pour traiter le code du clavier
+void processKeypadCode() {
+  if (keypadBuffer.length() == 0) {
+    Serial.println("⚠ Empty keypad buffer");
+    return;
+  }
+  
+  uint32_t code = keypadBuffer.toInt();
+  Serial.printf("🔢 Processing keypad code: %lu\n", code);
+  
+  bool granted = checkAccessCode(code, 0);  // Type 0 = Keypad
+  addAccessLog(code, granted, 0);
+  
+  if (granted) {
+    Serial.println("✓✓✓ Keypad code GRANTED ✓✓✓");
+    blinkReaderLED(true);
+    activateRelay(true);
+    
+    char payload[128];
+    snprintf(payload, sizeof(payload), 
+             "{\"code\":%lu,\"granted\":true,\"type\":\"keypad\"}", 
+             code);
+    publishMQTT("access", payload);
+  } else {
+    Serial.println("✗✗✗ Keypad code DENIED ✗✗✗");
+    blinkReaderLED(false);
+    
+    char payload[128];
+    snprintf(payload, sizeof(payload), 
+             "{\"code\":%lu,\"granted\":false,\"type\":\"keypad\"}", 
+             code);
+    publishMQTT("access", payload);
+  }
+}
+
+// Fonction pour faire clignoter les LEDs du lecteur
+void blinkReaderLED(bool success) {
+  if (success) {
+    // LED verte - 2 clignotements
+    for(int i=0; i<2; i++) {
+      digitalWrite(READER_LED_GREEN, HIGH);
+      delay(200);
+      digitalWrite(READER_LED_GREEN, LOW);
+      delay(200);
+    }
+  } else {
+    // LED rouge - 3 clignotements rapides
+    for(int i=0; i<3; i++) {
+      digitalWrite(READER_LED_RED, HIGH);
+      delay(100);
+      digitalWrite(READER_LED_RED, LOW);
+      delay(100);
+    }
   }
 }
 
