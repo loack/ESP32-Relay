@@ -108,6 +108,13 @@ void setup() {
   digitalWrite(RELAY_CLOSE, LOW);
   digitalWrite(STATUS_LED, LOW);
   
+  // ===== CONFIGURATION WiFi EN PREMIER =====
+  // Configuration WiFiManager (AVANT les paramètres WiFi)
+  wifiManager.setConfigPortalTimeout(180);  // 3 minutes pour configurer
+  wifiManager.setConnectTimeout(30);        // 30 secondes pour se connecter
+  wifiManager.setConnectRetries(3);         // 3 tentatives de connexion
+  wifiManager.setDebugOutput(true);         // Activer le debug
+  
   // Vérifier triple appui pour reset WiFi
   if (checkTriplePress()) {
     Serial.println("\n⚠⚠⚠ RESETTING WiFi credentials ⚠⚠⚠");
@@ -118,33 +125,17 @@ void setup() {
     ESP.restart();
   }
   
-  // Initialisation Wiegand
-  wg.begin(WIEGAND_D0, WIEGAND_D1);
-  Serial.println("✓ Wiegand initialized on pins 32 & 33");
-  
-  // Chargement de la configuration
-  preferences.begin("roller", false);
-  loadConfig();
-  loadAccessCodes();
-  
-  // Configuration WiFi avec WiFiManager
+  // Tentative de connexion WiFi
   Serial.println("\n⏱ Starting WiFi configuration...");
-  
-  // Configuration WiFi pour compatibilité Freebox
-  WiFi.setTxPower(WIFI_POWER_19_5dBm);  // Réduire la puissance pour éviter les timeouts
-  WiFi.setAutoReconnect(true);
-  WiFi.persistent(true);
-  
-  // Configuration WiFiManager
-  wifiManager.setConfigPortalTimeout(180);  // 3 minutes pour configurer
-  wifiManager.setConnectTimeout(30);        // 30 secondes pour se connecter
-  wifiManager.setConnectRetries(3);         // 3 tentatives de connexion
-  wifiManager.setDebugOutput(true);         // Activer le debug
-  
   Serial.println("If no saved credentials, access point will start:");
   Serial.println("SSID: ESP32-Roller-Setup");
   Serial.println("No password required");
   Serial.println("Connect and configure WiFi at: http://192.168.4.1\n");
+  
+  // Configuration WiFi pour compatibilité Freebox (juste avant autoConnect)
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);  // Réduire la puissance pour éviter les timeouts
+  WiFi.setAutoReconnect(true);
+  WiFi.persistent(true);
   
   digitalWrite(STATUS_LED, HIGH);
   
@@ -166,6 +157,20 @@ void setup() {
   Serial.print(WiFi.RSSI());
   Serial.println(" dBm");
   digitalWrite(STATUS_LED, LOW);
+  
+  // Arrêter le serveur de configuration WiFiManager pour libérer le port 80
+  wifiManager.stopConfigPortal();
+  delay(500);  // Attendre la libération du port
+  
+  // ===== INITIALISATION DES AUTRES COMPOSANTS =====
+  // Initialisation Wiegand
+  wg.begin(WIEGAND_D0, WIEGAND_D1);
+  Serial.println("✓ Wiegand initialized on pins 32 & 33");
+  
+  // Chargement de la configuration
+  preferences.begin("roller", false);
+  loadConfig();
+  loadAccessCodes();
   
   // Configuration serveur web
   setupWebServer();
