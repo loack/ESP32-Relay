@@ -84,29 +84,82 @@ void setupWebServer() {
       }
       
       JsonDocument doc;
-      deserializeJson(doc, (const char*)data);
+      DeserializationError error = deserializeJson(doc, (const char*)data);
       
-      accessCodes[accessCodeCount].code = doc["code"];
-      accessCodes[accessCodeCount].type = doc["type"];
-      strlcpy(accessCodes[accessCodeCount].name, doc["name"] | "Unnamed", 32);
+      if (error) {
+        request->send(400, "application/json", "{\"error\":\"JSON invalide\"}");
+        return;
+      }
+      
+      // Validation des champs requis
+      if (!doc["code"].is<uint32_t>() || !doc["type"].is<uint8_t>() || !doc["name"].is<const char*>()) {
+        request->send(400, "application/json", "{\"error\":\"Champs manquants ou invalides\"}");
+        return;
+      }
+      
+      uint32_t code = doc["code"];
+      uint8_t type = doc["type"];
+      const char* name = doc["name"];
+      
+      // Validation des valeurs
+      if (code == 0) {
+        request->send(400, "application/json", "{\"error\":\"Code ne peut pas être 0\"}");
+        return;
+      }
+      
+      if (type > 2) {
+        request->send(400, "application/json", "{\"error\":\"Type invalide (0-2)\"}");
+        return;
+      }
+      
+      if (strlen(name) == 0 || strlen(name) > 31) {
+        request->send(400, "application/json", "{\"error\":\"Nom invalide (1-31 caractères)\"}");
+        return;
+      }
+      
+      // Vérifier si le code existe déjà
+      for (int i = 0; i < accessCodeCount; i++) {
+        if (accessCodes[i].code == code && accessCodes[i].type == type) {
+          request->send(400, "application/json", "{\"error\":\"Ce code existe déjà\"}");
+          return;
+        }
+      }
+      
+      // Ajouter le code
+      accessCodes[accessCodeCount].code = code;
+      accessCodes[accessCodeCount].type = type;
+      strlcpy(accessCodes[accessCodeCount].name, name, 32);
       accessCodes[accessCodeCount].active = true;
       
       accessCodeCount++;
       saveAccessCodes();
       
+      Serial.printf("✓ Code added via web: %s (code=%lu, type=%d)\n", name, code, type);
+      
       request->send(200, "application/json", "{\"message\":\"Code ajouté\"}");
     }
   );
   
-  // API - Supprimer un code
-  server.on("^\\/api\\/codes\\/([0-9]+)$", HTTP_DELETE, [](AsyncWebServerRequest *request){
-    String indexStr = request->pathArg(0);
-    int idx = indexStr.toInt();
+  // API - Supprimer un code (simple GET avec paramètre)
+  server.on("/api/codes/delete", HTTP_GET, [](AsyncWebServerRequest *request){
+    if (!request->hasParam("index")) {
+      Serial.println("Delete: missing index parameter");
+      request->send(400, "application/json", "{\"error\":\"Paramètre index manquant\"}");
+      return;
+    }
+    
+    int idx = request->getParam("index")->value().toInt();
+    Serial.printf("Delete request for index: %d (total codes: %d)\n", idx, accessCodeCount);
     
     if (idx < 0 || idx >= accessCodeCount) {
+      Serial.printf("Invalid index: %d (valid range: 0-%d)\n", idx, accessCodeCount-1);
       request->send(400, "application/json", "{\"error\":\"Index invalide\"}");
       return;
     }
+    
+    // Sauvegarder le nom pour le log
+    char deletedName[32];
+    strlcpy(deletedName, accessCodes[idx].name, 32);
     
     // Décaler les codes
     for (int i = idx; i < accessCodeCount - 1; i++) {
@@ -114,6 +167,8 @@ void setupWebServer() {
     }
     accessCodeCount--;
     saveAccessCodes();
+    
+    Serial.printf("✓ Code deleted: %s (was at index %d)\n", deletedName, idx);
     
     request->send(200, "application/json", "{\"message\":\"Code supprimé\"}");
   });

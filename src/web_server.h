@@ -466,13 +466,31 @@ const char index_html[] PROGMEM = R"rawliteral(
         
         function hideAddCodeForm() {
             document.getElementById('add-code-form').style.display = 'none';
+            // Réinitialiser le formulaire
+            document.getElementById('new-code').value = '';
+            document.getElementById('new-type').value = '0';
+            document.getElementById('new-name').value = '';
         }
         
         function addCode() {
+            const codeValue = parseInt(document.getElementById('new-code').value);
+            const nameValue = document.getElementById('new-name').value;
+            
+            // Validation
+            if (!codeValue || isNaN(codeValue)) {
+                alert('Code invalide');
+                return;
+            }
+            
+            if (!nameValue || nameValue.trim() === '') {
+                alert('Nom requis');
+                return;
+            }
+            
             const code = {
-                code: parseInt(document.getElementById('new-code').value),
+                code: codeValue,
                 type: parseInt(document.getElementById('new-type').value),
-                name: document.getElementById('new-name').value,
+                name: nameValue.trim(),
                 active: true
             };
             
@@ -483,19 +501,38 @@ const char index_html[] PROGMEM = R"rawliteral(
             })
             .then(r => r.json())
             .then(data => {
-                alert(data.message || 'Code ajouté');
+                alert(data.message || data.error || 'Code ajouté');
                 hideAddCodeForm();
                 loadCodes();
+            })
+            .catch(err => {
+                alert('Erreur lors de l\'ajout: ' + err);
             });
         }
         
         function deleteCode(index) {
             if (!confirm('Supprimer ce code?')) return;
-            fetch('/api/codes/' + index, {method: 'DELETE'})
-            .then(r => r.json())
-            .then(data => {
-                alert(data.message || 'Code supprimé');
-                loadCodes();
+            
+            console.log('Deleting code at index:', index);
+            
+            fetch('/api/codes/delete?index=' + index)
+            .then(response => {
+                console.log('Response status:', response.status);
+                return response.json().then(data => ({status: response.status, body: data}));
+            })
+            .then(result => {
+                console.log('Response:', result);
+                if (result.status === 200) {
+                    alert(result.body.message || 'Code supprimé');
+                    // Attendre un peu avant de recharger pour être sûr que la NVS est sauvegardée
+                    setTimeout(() => loadCodes(), 100);
+                } else {
+                    alert('Erreur: ' + (result.body.error || 'Erreur inconnue'));
+                }
+            })
+            .catch(err => {
+                console.error('Delete error:', err);
+                alert('Erreur lors de la suppression: ' + err);
             });
         }
         
