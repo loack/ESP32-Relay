@@ -8,10 +8,14 @@
 #define WIEGAND_D1        33
 #define RELAY_OPEN        16
 #define RELAY_CLOSE       17
-#define PHOTO_BARRIER     27
+#define PHOTO_BARRIER     13
 #define STATUS_LED        2
 #define READER_LED_RED    14  // LED rouge du lecteur
 #define READER_LED_GREEN  12  // LED verte du lecteur
+
+// Broches pour les interrupteurs manuels
+#define PIN_UP_SWITCH 25
+#define PIN_DOWN_SWITCH 26
 
 // ===== STRUCTURES =====
 struct AccessCode {

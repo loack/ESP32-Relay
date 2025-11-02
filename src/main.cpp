@@ -129,6 +129,10 @@ void setup() {
   digitalWrite(STATUS_LED, LOW);
   digitalWrite(READER_LED_RED, LOW);
   digitalWrite(READER_LED_GREEN, LOW);
+
+    // Initialisation des interrupteurs manuels
+  pinMode(PIN_UP_SWITCH, INPUT_PULLUP);
+  pinMode(PIN_DOWN_SWITCH, INPUT_PULLUP);
   
   // ===== CONFIGURATION WiFi EN PREMIER =====
   // Configuration WiFiManager (AVANT les paramètres WiFi)
@@ -218,6 +222,23 @@ void setup() {
   }
 }
 
+void handleManualSwitches() {
+  static unsigned long lastPressTime = 0;
+  unsigned long debounceDelay = 200; // 200ms pour éviter les rebonds/répétitions
+
+  if (millis() - lastPressTime > debounceDelay) {
+    if (digitalRead(PIN_UP_SWITCH) == LOW) {
+      Serial.println("Manual switch: OPEN");
+      activateRelay(true);
+      lastPressTime = millis();
+    } else if (digitalRead(PIN_DOWN_SWITCH) == LOW) {
+      Serial.println("Manual switch: CLOSE");
+      activateRelay(false);
+      lastPressTime = millis();
+    }
+  }
+}
+
 // ===== LOOP =====
 void loop() {
   // Vérification connexion WiFi
@@ -256,6 +277,8 @@ void loop() {
   if (mqttClient.connected()) {
     mqttClient.loop();
   }
+  
+  handleManualSwitches(); // Ajouter l'appel à la nouvelle fonction
   
   delay(10);
 }
