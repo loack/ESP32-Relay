@@ -534,8 +534,26 @@ void blinkReaderLED(bool success) {
 
 // ===== FONCTIONS RELAIS =====
 void activateRelay(bool open) {
+  // SÉCURITÉ 1: Ne jamais activer les 2 relais simultanément !
+  digitalWrite(RELAY_OPEN, LOW);
+  digitalWrite(RELAY_CLOSE, LOW);
+  delay(100);  // Pause de sécurité
+  
+  // SÉCURITÉ 2: Vérifier que l'autre relais est bien OFF
+  if (open) {
+    if (digitalRead(RELAY_CLOSE) == HIGH) {
+      Serial.println("⚠ ERREUR: RELAY_CLOSE encore actif!");
+      return;
+    }
+  } else {
+    if (digitalRead(RELAY_OPEN) == HIGH) {
+      Serial.println("⚠ ERREUR: RELAY_OPEN encore actif!");
+      return;
+    }
+  }
+  
   if (relayActive) {
-    deactivateRelay();  // Désactiver d'abord si déjà actif
+    deactivateRelay();
     delay(100);
   }
   
