@@ -9,6 +9,9 @@
 #include <Wiegand.h>
 #include "config.h"
 
+// Bouton pour reset WiFi (bouton BOOT sur ESP32)
+#define RESET_WIFI_BUTTON 0
+
 // ===== OBJETS GLOBAUX =====
 WIEGAND wg;
 AsyncWebServer server(80);
@@ -37,12 +40,52 @@ bool checkAccessCode(uint32_t code, uint8_t type);
 void activateRelay(bool open);
 void deactivateRelay();
 void handleWiegandInput();
+bool checkTriplePress();
 
 // Fonctions externes (définies dans d'autres fichiers)
 void setupWebServer();
 void setupMQTT();
 void reconnectMQTT();
 void publishMQTT(const char* topic, const char* payload);
+
+// ===== FONCTION RESET WiFi =====
+// Fonction pour détecter 3 appuis sur le bouton BOOT
+bool checkTriplePress() {
+  int pressCount = 0;
+  unsigned long startTime = millis();
+  unsigned long lastPressTime = 0;
+  bool lastState = HIGH;
+  
+  Serial.println("\n⏱ WiFi Reset Check (10 seconds window)...");
+  Serial.println("Press BOOT button 3 times to reset WiFi credentials");
+  
+  while (millis() - startTime < 10000) {  // 10 secondes
+    bool currentState = digitalRead(RESET_WIFI_BUTTON);
+    
+    // Détection front descendant (appui)
+    if (lastState == HIGH && currentState == LOW) {
+      pressCount++;
+      lastPressTime = millis();
+      Serial.printf("✓ Press %d/3 detected\n", pressCount);
+      
+      if (pressCount >= 3) {
+        Serial.println("\n🔥 Triple press detected!");
+        return true;
+      }
+      
+      delay(50);  // Anti-rebond
+    }
+    
+    lastState = currentState;
+    delay(10);
+  }
+  
+  if (pressCount > 0) {
+    Serial.printf("Only %d press(es) detected. Reset cancelled.\n", pressCount);
+  }
+  Serial.println("No reset requested. Continuing...\n");
+  return false;
+}
 
 // ===== SETUP =====
 void setup() {
@@ -51,16 +94,29 @@ void setup() {
   
   Serial.println("\n\n=== ESP32 Roller Shutter Controller ===");
   Serial.println("Version 1.0 - With Wiegand, RFID & Fingerprint");
+  Serial.println("Chip ID: " + String((uint32_t)ESP.getEfuseMac(), HEX));
+  Serial.println("SDK Version: " + String(ESP.getSdkVersion()));
   
   // Configuration des pins
   pinMode(RELAY_OPEN, OUTPUT);
   pinMode(RELAY_CLOSE, OUTPUT);
   pinMode(PHOTO_BARRIER, INPUT_PULLUP);
   pinMode(STATUS_LED, OUTPUT);
+  pinMode(RESET_WIFI_BUTTON, INPUT_PULLUP);
   
   digitalWrite(RELAY_OPEN, LOW);
   digitalWrite(RELAY_CLOSE, LOW);
   digitalWrite(STATUS_LED, LOW);
+  
+  // Vérifier triple appui pour reset WiFi
+  if (checkTriplePress()) {
+    Serial.println("\n⚠⚠⚠ RESETTING WiFi credentials ⚠⚠⚠");
+    wifiManager.resetSettings();
+    delay(1000);
+    Serial.println("Credentials erased. Restarting...");
+    delay(2000);
+    ESP.restart();
+  }
   
   // Initialisation Wiegand
   wg.begin(WIEGAND_D0, WIEGAND_D1);
@@ -72,33 +128,43 @@ void setup() {
   loadAccessCodes();
   
   // Configuration WiFi avec WiFiManager
-  Serial.println("Starting WiFi configuration...");
+  Serial.println("\n⏱ Starting WiFi configuration...");
   
-  // Corrections pour compatibilité Freebox et ESP32
+  // Configuration WiFi pour compatibilité Freebox
   WiFi.setTxPower(WIFI_POWER_19_5dBm);  // Réduire la puissance pour éviter les timeouts
   WiFi.setAutoReconnect(true);
   WiFi.persistent(true);
   
-  wifiManager.setConfigPortalTimeout(180);
-  wifiManager.setConnectTimeout(30);  // Timeout de connexion à 30 secondes
-  wifiManager.setConnectRetries(3);   // 3 tentatives de connexion
+  // Configuration WiFiManager
+  wifiManager.setConfigPortalTimeout(180);  // 3 minutes pour configurer
+  wifiManager.setConnectTimeout(30);        // 30 secondes pour se connecter
+  wifiManager.setConnectRetries(3);         // 3 tentatives de connexion
+  wifiManager.setDebugOutput(true);         // Activer le debug
   
-  // Désactiver la détection du portail captif
-  wifiManager.setHttpPort(80);
+  Serial.println("If no saved credentials, access point will start:");
+  Serial.println("SSID: ESP32-Roller-Setup");
+  Serial.println("No password required");
+  Serial.println("Connect and configure WiFi at: http://192.168.4.1\n");
   
   digitalWrite(STATUS_LED, HIGH);
   
   if (!wifiManager.autoConnect("ESP32-Roller-Setup")) {
-    Serial.println("Failed to connect, restarting...");
-    // Effacer les credentials WiFi en cas d'échec répété
-    wifiManager.resetSettings();
-    delay(3000);
+    Serial.println("\n✗✗✗ WiFiManager failed to connect ✗✗✗");
+    Serial.println("Restarting in 5 seconds...");
+    digitalWrite(STATUS_LED, LOW);
+    delay(5000);
     ESP.restart();
   }
   
-  Serial.println("✓ WiFi connected!");
+  // Connexion réussie
+  Serial.println("\n✓✓✓ WiFi CONNECTED ✓✓✓");
   Serial.print("IP Address: ");
   Serial.println(WiFi.localIP());
+  Serial.print("Gateway: ");
+  Serial.println(WiFi.gatewayIP());
+  Serial.print("RSSI: ");
+  Serial.print(WiFi.RSSI());
+  Serial.println(" dBm");
   digitalWrite(STATUS_LED, LOW);
   
   // Configuration serveur web
@@ -127,6 +193,16 @@ void setup() {
 
 // ===== LOOP =====
 void loop() {
+  // Vérification connexion WiFi
+  static unsigned long lastWiFiCheck = 0;
+  if (millis() - lastWiFiCheck > 30000) {  // Toutes les 30 secondes
+    lastWiFiCheck = millis();
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("⚠ WiFi disconnected! Reconnecting...");
+      WiFi.reconnect();
+    }
+  }
+  
   // Gestion Wiegand
   handleWiegandInput();
   
