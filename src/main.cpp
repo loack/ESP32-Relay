@@ -47,6 +47,8 @@ void publishMQTT(const char* topic, const char* payload);
 // ===== SETUP =====
 void setup() {
   Serial.begin(115200);
+  delay(1000);  // Attendre la stabilisation du port série
+  
   Serial.println("\n\n=== ESP32 Roller Shutter Controller ===");
   Serial.println("Version 1.0 - With Wiegand, RFID & Fingerprint");
   
@@ -71,11 +73,25 @@ void setup() {
   
   // Configuration WiFi avec WiFiManager
   Serial.println("Starting WiFi configuration...");
+  
+  // Corrections pour compatibilité Freebox et ESP32
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);  // Réduire la puissance pour éviter les timeouts
+  WiFi.setAutoReconnect(true);
+  WiFi.persistent(true);
+  
   wifiManager.setConfigPortalTimeout(180);
+  wifiManager.setConnectTimeout(30);  // Timeout de connexion à 30 secondes
+  wifiManager.setConnectRetries(3);   // 3 tentatives de connexion
+  
+  // Désactiver la détection du portail captif
+  wifiManager.setHttpPort(80);
+  
   digitalWrite(STATUS_LED, HIGH);
   
   if (!wifiManager.autoConnect("ESP32-Roller-Setup")) {
     Serial.println("Failed to connect, restarting...");
+    // Effacer les credentials WiFi en cas d'échec répété
+    wifiManager.resetSettings();
     delay(3000);
     ESP.restart();
   }
