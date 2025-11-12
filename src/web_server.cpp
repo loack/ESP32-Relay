@@ -14,6 +14,7 @@ extern void saveConfig();
 extern void saveAccessCodes();
 extern void activateRelay(bool open);
 extern void deactivateRelay();
+extern bool deleteAccessCode(int index);
 
 void setupWebServer() {
   // Page principale
@@ -143,34 +144,17 @@ void setupWebServer() {
   // API - Supprimer un code (simple GET avec paramètre)
   server.on("/api/codes/delete", HTTP_GET, [](AsyncWebServerRequest *request){
     if (!request->hasParam("index")) {
-      Serial.println("Delete: missing index parameter");
       request->send(400, "application/json", "{\"error\":\"Paramètre index manquant\"}");
       return;
     }
     
     int idx = request->getParam("index")->value().toInt();
-    Serial.printf("Delete request for index: %d (total codes: %d)\n", idx, accessCodeCount);
     
-    if (idx < 0 || idx >= accessCodeCount) {
-      Serial.printf("Invalid index: %d (valid range: 0-%d)\n", idx, accessCodeCount-1);
-      request->send(400, "application/json", "{\"error\":\"Index invalide\"}");
-      return;
+    if (deleteAccessCode(idx)) {
+      request->send(200, "application/json", "{\"message\":\"Code supprimé\"}");
+    } else {
+      request->send(400, "application/json", "{\"error\":\"Index invalide ou erreur lors de la suppression\"}");
     }
-    
-    // Sauvegarder le nom pour le log
-    char deletedName[32];
-    strlcpy(deletedName, accessCodes[idx].name, 32);
-    
-    // Décaler les codes
-    for (int i = idx; i < accessCodeCount - 1; i++) {
-      accessCodes[i] = accessCodes[i + 1];
-    }
-    accessCodeCount--;
-    saveAccessCodes();
-    
-    Serial.printf("✓ Code deleted: %s (was at index %d)\n", deletedName, idx);
-    
-    request->send(200, "application/json", "{\"message\":\"Code supprimé\"}");
   });
   
   // API - Récupérer les logs

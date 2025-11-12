@@ -57,6 +57,7 @@ void blinkReaderLED(bool success);
 void processKeypadCode();
 bool addNewAccessCode(uint32_t code, uint8_t type, const char* name);
 bool removeAccessCode(uint32_t code, uint8_t type);
+bool deleteAccessCode(int index);
 void startLearningMode(uint8_t type, const char* name);
 void stopLearningMode();
 
@@ -338,7 +339,7 @@ void saveAccessCodes() {
     preferences.putBytes(key.c_str(), &accessCodes[i], sizeof(AccessCode));
   }
   
-  Serial.printf("✓ Saved %d access codes to flash\n", accessCodeCount);
+  Serial.printf("✓ Saved n° %d access code to flash\n", accessCodeCount);
 }
 
 // ===== FONCTIONS GESTION ACCÈS =====
@@ -718,6 +719,38 @@ bool removeAccessCode(uint32_t code, uint8_t type) {
            code, type, removedName, accessCodeCount);
   publishMQTT("codes", payload);
   
+  return true;
+}
+
+bool deleteAccessCode(int index) {
+  if (index < 0 || index >= accessCodeCount) {
+    Serial.printf("⚠ Invalid index for deletion: %d\n", index);
+    return false;
+  }
+
+  // Sauvegarder les infos pour le log
+  char removedName[32];
+  strncpy(removedName, accessCodes[index].name, sizeof(removedName));
+  uint32_t removedCode = accessCodes[index].code;
+  uint8_t removedType = accessCodes[index].type;
+
+  // Décaler tous les codes suivants
+  for (int i = index; i < accessCodeCount - 1; i++) {
+    accessCodes[i] = accessCodes[i + 1];
+  }
+
+  accessCodeCount--;
+  saveAccessCodes();
+
+  Serial.printf("✓ Access code removed at index %d: %s (code=%lu, type=%d)\n", index, removedName, removedCode, removedType);
+
+  // Publication MQTT
+  char payload[256];
+  snprintf(payload, sizeof(payload),
+           "{\"action\":\"removed\",\"code\":%lu,\"type\":%d,\"name\":\"%s\",\"total\":%d}",
+           removedCode, removedType, removedName, accessCodeCount);
+  publishMQTT("codes", payload);
+
   return true;
 }
 
