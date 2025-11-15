@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"name": "ESP32Wifi",
+			"path": "../ESP32Wifi"
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"main_old": "cpp"
+		}
+	}
+}
